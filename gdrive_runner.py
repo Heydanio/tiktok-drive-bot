@@ -130,6 +130,9 @@ def run_upload(local_path: Path, title_desc: str):
 def main():
     sch = ensure_today_schedule()
     slot = should_post_now(sch)
+        # Mode test : forcer le post même si ce n'est pas l'heure tirée
+    if not slot and os.environ.get("FORCE_POST") == "1":
+        slot = {"hour": 99, "minute": 99, "posted": False}  # créneau factice
     if not slot:
         now = datetime.now(PARIS_TZ)
         print(f"⏳ {now:%Y-%m-%d %H:%M} (Paris) — pas l'heure tirée aujourd'hui. Prochain passage…")
