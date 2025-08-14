@@ -11,22 +11,27 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4   # <-- ton dépôt (gdrive_runner + state + workflow)
+
+      # On récupère le projet original dans ./upstream
+      - name: Clone upstream project
+        run: git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
 
       # Python
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-      - run: pip install -r requirements.txt || true
+      - name: Install Python deps for upstream
+        run: pip install -r upstream/requirements.txt
       - run: pip install google-api-python-client google-auth google-auth-oauthlib
 
-      # Node (signature du projet upstream)
+      # Node (signature requise par le projet upstream)
       - uses: actions/setup-node@v4
         with:
           node-version: "20"
       - name: Install node deps for signature
         run: |
-          cd tiktok_uploader/tiktok-signature
+          cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
       # Exécution : si l'heure tirée au sort est atteinte -> post
@@ -38,7 +43,7 @@ jobs:
           COOKIES_BASE64:     ${{ secrets.COOKIES_BASE64 }}
         run: python gdrive_runner.py
 
-      # Commit des états si modifiés
+      # Commit des états si modifiés (dans TON dépôt)
       - name: Commit state if changed
         run: |
           if [[ -n "$(git status --porcelain)" ]]; then
