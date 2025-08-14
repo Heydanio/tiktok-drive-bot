@@ -37,6 +37,7 @@ jobs:
       # Exécution : si l'heure tirée au sort est atteinte -> post
       - name: Run Drive runner
         env:
+          FORCE_POST: "1"
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
