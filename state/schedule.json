@@ -1,0 +1,30 @@
+{
+  "date": "2025-08-15",
+  "slots": [
+    {
+      "hour": 8,
+      "minute": 25,
+      "posted": false
+    },
+    {
+      "hour": 11,
+      "minute": 15,
+      "posted": false
+    },
+    {
+      "hour": 14,
+      "minute": 20,
+      "posted": false
+    },
+    {
+      "hour": 17,
+      "minute": 55,
+      "posted": false
+    },
+    {
+      "hour": 20,
+      "minute": 0,
+      "posted": false
+    }
+  ]
+}
