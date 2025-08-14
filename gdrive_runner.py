@@ -1,6 +1,7 @@
 # gdrive_runner.py — Google Drive + 5 créneaux/jour aléatoires (heure FR)
 import base64, io, json, os, random, subprocess, sys, tempfile
 from pathlib import Path
+CLI_PATH = Path("upstream/cli.py") 
 from typing import List
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -121,7 +122,7 @@ def restore_cookies():
     (Path("CookiesDir") / "main.cookie").write_bytes(raw)
 
 def run_upload(local_path: Path, title_desc: str):
-    cmd = [sys.executable, "cli.py", "upload", "--user", TIKTOK_USER, "-v", str(local_path), "-t", title_desc]
+    cmd = [sys.executable, str(CLI_PATH), "upload", "--user", TIKTOK_USER, "-v", str(local_path), "-t", title_desc]
     print("RUN:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
