@@ -3,7 +3,7 @@ name: tiktok-random-5-slots
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 7 * * *'  # Démarre chaque jour à 7h UTC (8h Paris l'hiver)
+    - cron: '0 7 * * *' # 8h Paris l'hiver
 
 jobs:
   post:
@@ -20,20 +20,14 @@ jobs:
         with:
           python-version: '3.11'
 
-      # 3. Installer dépendances gdrive_runner
-      - name: Install requirements
-        run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
-
-      # 4. Cloner le projet upstream TikTokAutoUploader
+      # 3. Cloner et installer le projet TikTokAutoUploader
       - name: Clone upstream uploader
         run: |
           rm -rf upstream
           git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
           pip install -r upstream/requirements.txt
 
-      # 5. Créer config.txt dans le BON dossier (upstream)
+      # 4. Créer config.txt dans upstream
       - name: Create config.txt for uploader
         run: |
           echo "cookies_dir: ../CookiesDir" > upstream/config.txt
@@ -41,7 +35,7 @@ jobs:
           echo "headless: true" >> upstream/config.txt
           echo "no_watermark: false" >> upstream/config.txt
 
-      # 6. Lancer le script de récupération & upload
+      # 5. Lancer ton bot
       - name: Run Drive runner
         env:
           FORCE_POST: "1"
