@@ -37,6 +37,9 @@ jobs:
           pip install -r upstream/requirements.txt --no-deps
           pip install google-api-python-client google-auth google-auth-oauthlib
 
+      - name: Install pytz
+        run: pip install pytz
+        
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
