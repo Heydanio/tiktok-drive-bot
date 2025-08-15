@@ -209,7 +209,7 @@ def ensure_today_schedule():
         print(f"📅 Planning du {today} (Europe/Paris) → {picked}")
     return sch
 
-GRACE_MINUTES = 10  # tolérance pour le jitter GitHub Actions (5 min + marge)
+GRACE_MINUTES = 20  # tolérance pour le jitter GitHub Actions (5 min + marge)
 
 def should_post_now(sch):
     now = datetime.now(PARIS_TZ)
