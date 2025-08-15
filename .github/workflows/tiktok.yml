@@ -2,7 +2,7 @@ name: tiktok-random-5-slots
 
 on:
   workflow_dispatch:
-  # Laisse ce cron pour la prod : le script ne postera que sur les 5 minutes tirées
+  # Exécute toutes les 5 minutes ; ton script ne postera QUE aux 5 minutes tirées (8h/11h/14h/17h/20h Europe/Paris).
   schedule:
     - cron: "*/5 * * * *"
 
@@ -32,14 +32,11 @@ jobs:
       - name: Install Python deps (patched)
         run: |
           python -m pip install --upgrade pip
-          # Résout le conflit: undetected-chromedriver requiert selenium >= 4.18
           pip install "selenium>=4.20.0" undetected-chromedriver
-          # Installe le requirements upstream sans résoudre les deps (évite conflits)
           pip install -r upstream/requirements.txt --no-deps
-          # Google Drive API
           pip install google-api-python-client google-auth google-auth-oauthlib
 
-      # 4) Node (signature TikTok du projet)
+      # 4) Node (signature TikTok)
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -50,26 +47,52 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # 5) (Optionnel) Build du bundle de signature si le script existe
+      # 5) Rendre disponible le chemin attendu par l'uploader :
+      #    - lien symbolique: ./tiktok_uploader -> ./upstream/tiktok_uploader
+      #    - si browser.js manque, on le crée avec le contenu fourni
+      - name: Ensure signature path exists (symlink + fallback browser.js)
+        run: |
+          set -e
+          # lien symbolique pour que le chemin tiktok_uploader/... existe à la racine
+          ln -s upstream/tiktok_uploader tiktok_uploader || true
+          # Si browser.js n'existe pas dans le chemin attendu, on le crée
+          if [ ! -f tiktok_uploader/tiktok-signature/browser.js ]; then
+            mkdir -p tiktok_uploader/tiktok-signature
+            cat > tiktok_uploader/tiktok-signature/browser.js <<'EOF'
+// Browser.js (fallback)
+const Signer = require("../../upstream/tiktok_uploader/tiktok-signature/index");
+var url = process.argv[2];
+var userAgent = process.argv[3];
+(async function main() {
+  try {
+    const signer = new Signer(url, userAgent);
+    await signer.init();
+    const sign = await signer.sign(url);
+    const navigator = await signer.navigator();
+    let output = JSON.stringify({
+      status: "ok",
+      data: {
+        ...sign,
+        navigator: navigator,
+      },
+    });
+    console.log(output);
+    await signer.close();
+  } catch (err) {
+    console.error(err);
+  }
+})();
+EOF
+          fi
+
+      # 6) (Optionnel) Build du bundle de signature s'il existe
       - name: Build signature bundle if present
         run: |
           if [ -f upstream/tiktok_uploader/tiktok-signature/build.mjs ]; then
             node upstream/tiktok_uploader/tiktok-signature/build.mjs || true
           fi
 
-      # 6) Lancer le serveur de signature en arrière-plan (si présent)
-      - name: Start signature server
-        run: |
-          if [ -f upstream/tiktok_uploader/tiktok-signature/listen.js ]; then
-            node upstream/tiktok_uploader/tiktok-signature/listen.js &
-          elif [ -f upstream/tiktok_uploader/tiktok-signature/index.js ]; then
-            node upstream/tiktok_uploader/tiktok-signature/index.js --serve &
-          else
-            echo "No signature server entry found (listen.js/index.js)."
-          fi
-          sleep 2
-
-      # 7) Créer config.txt (MAJUSCULES + "=") à la racine + copie dans upstream/
+      # 7) Créer config.txt (MAJUSCULES + '=') à la racine + copie dans upstream/
       - name: Create config.txt for uploader (root + upstream)
         run: |
           {
@@ -90,7 +113,6 @@ jobs:
       # 8) Lancer le runner (pas de FORCE_POST en prod)
       - name: Run Drive runner
         env:
-          FORCE_POST: "1"
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
