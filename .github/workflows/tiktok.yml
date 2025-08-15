@@ -3,7 +3,7 @@ name: tiktok-random-5-slots
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/5 * * * *"   # tests (tu pourras remettre ton planning ensuite)
+    - cron: "*/5 * * * *"   # tests (tu remettras ton planning ensuite)
 
 permissions:
   contents: write
@@ -31,11 +31,11 @@ jobs:
       - name: Install Python deps (patched)
         run: |
           python -m pip install --upgrade pip
-          # Résout le conflit: on installe d'abord selenium récent + undetected-chromedriver
+          # Résout le conflit selenium
           pip install "selenium>=4.20.0" undetected-chromedriver
-          # Puis on installe le reste du requirements du projet sans résoudre les deps
+          # Installe le reste sans résoudre les deps
           pip install -r upstream/requirements.txt --no-deps
-          # Déps pour Google Drive
+          # Déps Google Drive
           pip install google-api-python-client google-auth google-auth-oauthlib
 
       # 4) Node (signature TikTok du projet)
@@ -49,13 +49,17 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # 5) Créer config.txt là où le CLI le cherche (dans upstream/)
-      - name: Create config.txt for uploader
+      # 5) Créer config.txt aux DEUX endroits (racine et upstream)
+      - name: Create config.txt for uploader (root + upstream)
         run: |
-          echo "cookies_dir: ../CookiesDir" > upstream/config.txt
-          echo "videos_dir: ../VideosDir" >> upstream/config.txt
-          echo "headless: true" >> upstream/config.txt
-          echo "no_watermark: false" >> upstream/config.txt
+          # config utilisé si le CWD est la racine (ce qui est le cas quand on lance upstream/cli.py)
+          echo "cookies_dir: ./CookiesDir" > config.txt
+          echo "videos_dir: ./VideosDir" >> config.txt
+          echo "headless: true" >> config.txt
+          echo "no_watermark: false" >> config.txt
+
+          # copie dans upstream/ au cas où le CWD serait upstream/
+          cp config.txt upstream/config.txt
 
       # 6) Lancer ton runner (FORCE_POST pour tester tout de suite)
       - name: Run Drive runner
