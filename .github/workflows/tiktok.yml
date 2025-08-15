@@ -11,7 +11,7 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4   # ton dépôt (gdrive_runner + state + workflow)
+      - uses: actions/checkout@v4   # Ton dépôt (gdrive_runner + state + workflow)
 
       # On récupère le projet original dans ./upstream
       - name: Clone upstream project
@@ -36,10 +36,10 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # Exécution : on force le post pour test
+      # Exécution : on force le post pour test immédiat
       - name: Run Drive runner
         env:
-          FORCE_POST: "1"  # <-- test immédiat
+          FORCE_POST: "1"  # <-- Test immédiat
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
@@ -49,10 +49,16 @@ jobs:
       # Commit des états si modifiés (dans TON dépôt)
       - name: Commit state if changed
         run: |
-          if [[ -n "$(git status --porcelain)" ]]; then
+          # Supprimer les dossiers temporaires avant de vérifier l'état
+          rm -rf CookiesDir upstream
+          
+          # Vérifier uniquement les changements dans state/
+          if [[ -n "$(git status --porcelain state)" ]]; then
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
             git add state/*.json
             git commit -m "update state/schedule"
             git push --force
+          else
+            echo "Aucun changement dans state/, rien à commit."
           fi
