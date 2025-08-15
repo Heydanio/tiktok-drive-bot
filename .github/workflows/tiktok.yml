@@ -36,6 +36,12 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
+      # Création du fichier config.txt manquant
+      - name: Create config.txt for uploader
+        run: |
+          echo "cookies_dir = ./CookiesDir" > config.txt
+          echo "headless = true" >> config.txt
+
       # Exécution : on force le post pour test immédiat
       - name: Run Drive runner
         env:
