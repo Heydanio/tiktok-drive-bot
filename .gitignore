@@ -16,3 +16,6 @@ node_modules/
 # On garde l'état (plan/used) versionné :
 !state/
 !state/*.json
+
+state/
+
