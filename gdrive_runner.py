@@ -119,7 +119,12 @@ def download_file(svc, file_id: str, dest: Path):
 def restore_cookies():
     Path("CookiesDir").mkdir(exist_ok=True)
     raw = base64.b64decode(COOKIE_B64.encode("utf-8"))
+    uname = TIKTOK_USER.strip().lstrip("@")
+    # le tien généré par login:
+    (Path("CookiesDir") / f"tiktok_session-{uname}.cookie").write_bytes(raw)
+    # copié sous d'autres noms possibles:
     (Path("CookiesDir") / "main.cookie").write_bytes(raw)
+    (Path("CookiesDir") / f"{uname}.cookie").write_bytes(raw)
 
 def run_upload(local_path: Path, title_desc: str):
     cmd = [sys.executable, str(CLI_PATH), "upload", "--user", TIKTOK_USER, "-v", str(local_path), "-t", title_desc]
