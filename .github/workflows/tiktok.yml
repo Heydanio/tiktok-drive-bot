@@ -3,31 +3,53 @@ name: tiktok-random-5-slots
 on:
   workflow_dispatch:
   schedule:
-    - cron: '0 7 * * *' # 8h Paris l'hiver
+    - cron: "*/5 * * * *"   # tests (tu pourras remettre ton planning ensuite)
+
+permissions:
+  contents: write
 
 jobs:
   post:
     runs-on: ubuntu-latest
-
     steps:
-      # 1. Cloner ton repo
+      # 1) Ton dépôt
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2. Installer Python
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-
-      # 3. Cloner et installer le projet TikTokAutoUploader
+      # 2) Clone du projet upstream
       - name: Clone upstream uploader
         run: |
           rm -rf upstream
           git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
-          pip install -r upstream/requirements.txt
 
-      # 4. Créer config.txt dans upstream
+      # 3) Python + deps (patch pour le conflit selenium)
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install Python deps (patched)
+        run: |
+          python -m pip install --upgrade pip
+          # Résout le conflit: on installe d'abord selenium récent + undetected-chromedriver
+          pip install "selenium>=4.20.0" undetected-chromedriver
+          # Puis on installe le reste du requirements du projet sans résoudre les deps
+          pip install -r upstream/requirements.txt --no-deps
+          # Déps pour Google Drive
+          pip install google-api-python-client google-auth google-auth-oauthlib
+
+      # 4) Node (signature TikTok du projet)
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install node deps for signature
+        run: |
+          cd upstream/tiktok_uploader/tiktok-signature
+          npm i
+
+      # 5) Créer config.txt là où le CLI le cherche (dans upstream/)
       - name: Create config.txt for uploader
         run: |
           echo "cookies_dir: ../CookiesDir" > upstream/config.txt
@@ -35,7 +57,7 @@ jobs:
           echo "headless: true" >> upstream/config.txt
           echo "no_watermark: false" >> upstream/config.txt
 
-      # 5. Lancer ton bot
+      # 6) Lancer ton runner (FORCE_POST pour tester tout de suite)
       - name: Run Drive runner
         env:
           FORCE_POST: "1"
@@ -43,5 +65,18 @@ jobs:
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
           COOKIES_BASE64:     ${{ secrets.COOKIES_BASE64 }}
+        run: python gdrive_runner.py
+
+      # 7) Commit de l'état (ignore dossiers temporaires)
+      - name: Commit state if changed
         run: |
-          python gdrive_runner.py
+          rm -rf CookiesDir upstream
+          if [[ -n "$(git status --porcelain state)" ]]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add state/*.json
+            git commit -m "update state/schedule"
+            git push --force
+          else
+            echo "Aucun changement dans state/, rien à commit."
+          fi
