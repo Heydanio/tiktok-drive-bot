@@ -33,13 +33,13 @@ jobs:
       - name: Install Python deps (patched)
         run: |
           python -m pip install --upgrade pip
+          # corrige le conflit selenium/undetected-chromedriver
           pip install "selenium>=4.20.0" undetected-chromedriver
+          # installe le reste sans résolution des deps
           pip install -r upstream/requirements.txt --no-deps
+          # Google Drive
           pip install google-api-python-client google-auth google-auth-oauthlib
 
-      - name: Install pytz
-        run: pip install pytz
-        
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -50,6 +50,7 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
+      # chemin attendu + browser.js de secours (base64) — pas de heredoc
       - name: Ensure signature path exists (symlink + fallback browser.js)
         shell: bash
         run: |
