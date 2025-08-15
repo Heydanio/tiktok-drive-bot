@@ -11,7 +11,7 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4   # <-- ton dépôt (gdrive_runner + state + workflow)
+      - uses: actions/checkout@v4   # ton dépôt (gdrive_runner + state + workflow)
 
       # On récupère le projet original dans ./upstream
       - name: Clone upstream project
@@ -36,10 +36,10 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # Exécution : si l'heure tirée au sort est atteinte -> post
+      # Exécution : on force le post pour test
       - name: Run Drive runner
         env:
-          FORCE_POST: "1"
+          FORCE_POST: "1"  # <-- test immédiat
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
