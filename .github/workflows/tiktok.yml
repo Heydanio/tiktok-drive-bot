@@ -2,7 +2,6 @@ name: tiktok-random-5-slots
 
 on:
   workflow_dispatch:
-  # Exécute toutes les 5 minutes ; ton script ne postera QUE aux 5 minutes tirées (8h/11h/14h/17h/20h Europe/Paris).
   schedule:
     - cron: "*/5 * * * *"
 
@@ -13,17 +12,14 @@ jobs:
   post:
     runs-on: ubuntu-latest
     steps:
-      # 1) Ton dépôt
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      # 2) Clone du projet upstream
       - name: Clone upstream uploader
         run: |
           rm -rf upstream
           git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
 
-      # 3) Python + deps (patch pour le conflit selenium)
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
@@ -36,7 +32,6 @@ jobs:
           pip install -r upstream/requirements.txt --no-deps
           pip install google-api-python-client google-auth google-auth-oauthlib
 
-      # 4) Node (signature TikTok)
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -47,52 +42,46 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # 5) Rendre disponible le chemin attendu par l'uploader :
-      #    - lien symbolique: ./tiktok_uploader -> ./upstream/tiktok_uploader
-      #    - si browser.js manque, on le crée avec le contenu fourni
       - name: Ensure signature path exists (symlink + fallback browser.js)
+        shell: bash
         run: |
           set -e
-          # lien symbolique pour que le chemin tiktok_uploader/... existe à la racine
-          ln -s upstream/tiktok_uploader tiktok_uploader || true
-          # Si browser.js n'existe pas dans le chemin attendu, on le crée
+          # Lien symbolique attendu par l’uploader (chemin racine)
+          ln -s upstream/tiktok_uploader tiktok_uploader 2>/dev/null || true
+          # Si browser.js est manquant, on crée un fallback minimal
           if [ ! -f tiktok_uploader/tiktok-signature/browser.js ]; then
             mkdir -p tiktok_uploader/tiktok-signature
-            cat > tiktok_uploader/tiktok-signature/browser.js <<'EOF'
-// Browser.js (fallback)
-const Signer = require("../../upstream/tiktok_uploader/tiktok-signature/index");
-var url = process.argv[2];
-var userAgent = process.argv[3];
+            cat > tiktok_uploader/tiktok-signature/browser.js <<'JS'
+const Signer = require("./index");
+const url = process.argv[2];
+const userAgent = process.argv[3];
+
 (async function main() {
   try {
     const signer = new Signer(url, userAgent);
     await signer.init();
     const sign = await signer.sign(url);
     const navigator = await signer.navigator();
-    let output = JSON.stringify({
+    const output = JSON.stringify({
       status: "ok",
-      data: {
-        ...sign,
-        navigator: navigator,
-      },
+      data: { ...sign, navigator }
     });
     console.log(output);
     await signer.close();
   } catch (err) {
     console.error(err);
+    process.exit(1);
   }
 })();
-EOF
+JS
           fi
 
-      # 6) (Optionnel) Build du bundle de signature s'il existe
       - name: Build signature bundle if present
         run: |
           if [ -f upstream/tiktok_uploader/tiktok-signature/build.mjs ]; then
             node upstream/tiktok_uploader/tiktok-signature/build.mjs || true
           fi
 
-      # 7) Créer config.txt (MAJUSCULES + '=') à la racine + copie dans upstream/
       - name: Create config.txt for uploader (root + upstream)
         run: |
           {
@@ -110,7 +99,6 @@ EOF
           } > config.txt
           cp config.txt upstream/config.txt
 
-      # 8) Lancer le runner (pas de FORCE_POST en prod)
       - name: Run Drive runner
         env:
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
@@ -119,7 +107,6 @@ EOF
           COOKIES_BASE64:     ${{ secrets.COOKIES_BASE64 }}
         run: python gdrive_runner.py
 
-      # 9) Commit de l'état (ignore dossiers temporaires)
       - name: Commit state if changed
         run: |
           rm -rf CookiesDir upstream
