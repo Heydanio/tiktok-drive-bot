@@ -1,21 +1,34 @@
-# Cookies / secrets locaux (ne jamais committer)
-CookiesDir/
-*.cookie
+# Évite de pousser des identifiants ou tokens
+state/
+*.json
 *.pem
 *.p12
-*.pfx
+*.key
+*.crt
+*.cer
 
-# Fichiers de conf sensibles éventuels
-config.txt
-client_secrets.json
-*credentials*.json
+# Secrets et configs sensibles
+.env
+secrets/
+config/
+credentials/
+token_*.txt
+*.b64
 
-# Node/Yarn au cas où
-node_modules/
+# Fichiers d'authentification API
+client_secret*.json
+*_credentials.json
+service_account.json
 
-# On garde l'état (plan/used) versionné :
-!state/
-!state/*.json
+# Cache / fichiers temporaires
+*.log
+*.tmp
+*.temp
+*.cache
+__pycache__/
+*.pyc
 
-state/
-
+# Sorties générées automatiquement
+output/
+downloads/
+uploads/
