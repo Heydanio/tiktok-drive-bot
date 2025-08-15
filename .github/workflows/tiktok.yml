@@ -1,43 +1,39 @@
 name: tiktok-random-5-slots
-on:
-  schedule:
-    - cron: "*/5 * * * *"   # toutes les 5 min (test)
-  workflow_dispatch:
 
-permissions:
-  contents: write
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 7 * * *'  # Démarre chaque jour à 7h UTC (8h Paris l'hiver)
 
 jobs:
   post:
     runs-on: ubuntu-latest
+
     steps:
-      # 1. Récupère ton dépôt
-      - uses: actions/checkout@v4
+      # 1. Cloner ton repo
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # 2. Clone le projet TikTok uploader dans ./upstream
-      - name: Clone upstream project
-        run: git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
-
-      # 3. Setup Python et installe les dépendances
-      - uses: actions/setup-python@v5
+      # 2. Installer Python
+      - name: Set up Python
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
-      - name: Install Python deps for upstream
-        run: |
-          pip install undetected-chromedriver
-          pip install -r upstream/requirements.txt --no-deps
-      - run: pip install google-api-python-client google-auth google-auth-oauthlib
+          python-version: '3.11'
 
-      # 4. Setup Node.js pour la signature
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - name: Install node deps for signature
+      # 3. Installer dépendances gdrive_runner
+      - name: Install requirements
         run: |
-          cd upstream/tiktok_uploader/tiktok-signature
-          npm i
+          pip install --upgrade pip
+          pip install -r requirements.txt
 
-      # 5. Création du config.txt dans upstream/
+      # 4. Cloner le projet upstream TikTokAutoUploader
+      - name: Clone upstream uploader
+        run: |
+          rm -rf upstream
+          git clone https://github.com/makiisthenes/TiktokAutoUploader upstream
+          pip install -r upstream/requirements.txt
+
+      # 5. Créer config.txt dans le BON dossier (upstream)
       - name: Create config.txt for uploader
         run: |
           echo "cookies_dir: ../CookiesDir" > upstream/config.txt
@@ -45,26 +41,13 @@ jobs:
           echo "headless: true" >> upstream/config.txt
           echo "no_watermark: false" >> upstream/config.txt
 
-      # 6. Lance ton script qui prend une vidéo du Drive et l'upload
+      # 6. Lancer le script de récupération & upload
       - name: Run Drive runner
         env:
-          FORCE_POST: "1"  # Test immédiat
+          FORCE_POST: "1"
           GDRIVE_SA_JSON_B64: ${{ secrets.GDRIVE_SA_JSON_B64 }}
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
           COOKIES_BASE64:     ${{ secrets.COOKIES_BASE64 }}
-        run: python gdrive_runner.py
-
-      # 7. Commit des fichiers de state si modifiés
-      - name: Commit state if changed
         run: |
-          rm -rf CookiesDir upstream
-          if [[ -n "$(git status --porcelain state)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add state/*.json
-            git commit -m "update state/schedule"
-            git push --force
-          else
-            echo "Aucun changement dans state/, rien à commit."
-          fi
+          python gdrive_runner.py
