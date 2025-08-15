@@ -42,39 +42,14 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
+      # Crée le chemin attendu + un browser.js de secours via Node (pas de heredoc)
       - name: Ensure signature path exists (symlink + fallback browser.js)
         shell: bash
         run: |
           set -e
-          # Lien symbolique attendu par l’uploader (chemin racine)
           ln -s upstream/tiktok_uploader tiktok_uploader 2>/dev/null || true
-          # Si browser.js est manquant, on crée un fallback minimal
-          if [ ! -f tiktok_uploader/tiktok-signature/browser.js ]; then
-            mkdir -p tiktok_uploader/tiktok-signature
-            cat > tiktok_uploader/tiktok-signature/browser.js <<'JS'
-const Signer = require("./index");
-const url = process.argv[2];
-const userAgent = process.argv[3];
-
-(async function main() {
-  try {
-    const signer = new Signer(url, userAgent);
-    await signer.init();
-    const sign = await signer.sign(url);
-    const navigator = await signer.navigator();
-    const output = JSON.stringify({
-      status: "ok",
-      data: { ...sign, navigator }
-    });
-    console.log(output);
-    await signer.close();
-  } catch (err) {
-    console.error(err);
-    process.exit(1);
-  }
-})();
-JS
-          fi
+          mkdir -p tiktok_uploader/tiktok-signature
+          node -e "require('fs').writeFileSync('tiktok_uploader/tiktok-signature/browser.js', `const Signer = require('./index');\nconst url = process.argv[2];\nconst userAgent = process.argv[3];\n(async function main(){try{const signer=new Signer(url,userAgent);await signer.init();const sign=await signer.sign(url);const navigator=await signer.navigator();const output=JSON.stringify({status:'ok',data:{...sign,navigator}});console.log(output);await signer.close();}catch(err){console.error(err);process.exit(1);}})();` );"
 
       - name: Build signature bundle if present
         run: |
@@ -84,19 +59,17 @@ JS
 
       - name: Create config.txt for uploader (root + upstream)
         run: |
-          {
-            echo 'COOKIES_DIR=./CookiesDir'
-            echo 'VIDEOS_DIR=./VideosDirPath'
-            echo 'POST_PROCESSING_VIDEO_PATH=./VideosDirPath'
-            echo 'IMAGEMAGICK_FONT=Arial'
-            echo 'IMAGEMAGICK_FONT_SIZE=80'
-            echo 'IMAGEMAGICK_TEXT_FOREGROUND_COLOR=white'
-            echo 'IMAGEMAGICK_TEXT_BACKGROUND_COLOR=black'
-            echo 'TMP_YOUTUBE_VIDEO_DIR='
-            echo 'LANG=en'
-            echo 'TIKTOK_BASE_URL=https://www.tiktok.com/upload?lang='
-            echo 'IMAGEMAGICK_BINARY='
-          } > config.txt
+          echo 'COOKIES_DIR=./CookiesDir' > config.txt
+          echo 'VIDEOS_DIR=./VideosDirPath' >> config.txt
+          echo 'POST_PROCESSING_VIDEO_PATH=./VideosDirPath' >> config.txt
+          echo 'IMAGEMAGICK_FONT=Arial' >> config.txt
+          echo 'IMAGEMAGICK_FONT_SIZE=80' >> config.txt
+          echo 'IMAGEMAGICK_TEXT_FOREGROUND_COLOR=white' >> config.txt
+          echo 'IMAGEMAGICK_TEXT_BACKGROUND_COLOR=black' >> config.txt
+          echo 'TMP_YOUTUBE_VIDEO_DIR=' >> config.txt
+          echo 'LANG=en' >> config.txt
+          echo 'TIKTOK_BASE_URL=https://www.tiktok.com/upload?lang=' >> config.txt
+          echo 'IMAGEMAGICK_BINARY=' >> config.txt
           cp config.txt upstream/config.txt
 
       - name: Run Drive runner
