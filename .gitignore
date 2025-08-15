@@ -1,0 +1,18 @@
+# Cookies / secrets locaux (ne jamais committer)
+CookiesDir/
+*.cookie
+*.pem
+*.p12
+*.pfx
+
+# Fichiers de conf sensibles éventuels
+config.txt
+client_secrets.json
+*credentials*.json
+
+# Node/Yarn au cas où
+node_modules/
+
+# On garde l'état (plan/used) versionné :
+!state/
+!state/*.json
