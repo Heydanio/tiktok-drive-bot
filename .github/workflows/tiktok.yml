@@ -11,7 +11,7 @@ on:
     - cron: "*/5 * * * *"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   post:
@@ -19,6 +19,34 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
+      # ---- RESTORE STATE (used.json cumulatif) ----
+      - name: Restore USED state (latest)
+        id: used-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: state/used.json
+          key: used-v1-${{ github.run_id }}
+          restore-keys: |
+            used-v1-
+
+      # ---- RESTORE SCHEDULE (du jour) ----
+      - name: Restore TODAY schedule (latest today)
+        id: sch-restore
+        uses: actions/cache/restore@v4
+        with:
+          path: state/schedule.json
+          key: schedule-v1-${{ github.run_id }}-${{ env.TODAY }}
+          restore-keys: |
+            schedule-v1-${{ env.TODAY }}
+            schedule-v1-
+        env:
+          TODAY: ${{ steps.set-today.outputs.today }}
+
+      # On calcule la date (YYYY-MM-DD) une fois pour le job
+      - name: Set TODAY
+        id: set-today
+        run: echo "today=$(TZ=Europe/Paris date +%F)" >> $GITHUB_OUTPUT
 
       - name: Clone upstream uploader
         run: |
@@ -33,11 +61,8 @@ jobs:
       - name: Install Python deps (patched)
         run: |
           python -m pip install --upgrade pip
-          # corrige le conflit selenium/undetected-chromedriver
           pip install "selenium>=4.20.0" undetected-chromedriver
-          # installe le reste sans résolution des deps
           pip install -r upstream/requirements.txt --no-deps
-          # Google Drive
           pip install google-api-python-client google-auth google-auth-oauthlib
 
       - name: Set up Node
@@ -50,7 +75,6 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # chemin attendu + browser.js de secours (base64) — pas de heredoc
       - name: Ensure signature path exists (symlink + fallback browser.js)
         shell: bash
         run: |
@@ -91,17 +115,22 @@ jobs:
           GDRIVE_FOLDER_IDS:  ${{ secrets.GDRIVE_FOLDER_IDS }}
           TIKTOK_USERNAME:    ${{ secrets.TIKTOK_USERNAME }}
           COOKIES_BASE64:     ${{ secrets.COOKIES_BASE64 }}
-        run: python gdrive_runner.py
-
-      - name: Commit state if changed
         run: |
-          rm -rf CookiesDir upstream
-          if [[ -n "$(git status --porcelain state)" ]]; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add state/*.json
-            git commit -m "update state/schedule"
-            git push --force
-          else
-            echo "Aucun changement dans state/, rien à commit."
-          fi
+          mkdir -p state
+          python gdrive_runner.py
+
+      # ---- SAVE STATE (used.json mis à jour) ----
+      - name: Save USED state (rolling)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/used.json
+          key: used-v1-${{ github.run_id }}
+
+      # ---- SAVE SCHEDULE (du jour, mis à jour) ----
+      - name: Save TODAY schedule (rolling)
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: state/schedule.json
+          key: schedule-v1-${{ github.run_id }}-${{ steps.set-today.outputs.today }}
