@@ -1,7 +1,7 @@
 name: tiktok-random-5-slots
 on:
   schedule:
-    - cron: "*/5 * * * *"   # toutes les 5 minutes (UTC) pour test
+    - cron: "*/5 * * * *"   # toutes les 5 minutes (juste pour tests)
   workflow_dispatch:
 
 permissions:
@@ -36,12 +36,13 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # Création du fichier config.txt avec toutes les clés requises
+      # Création du fichier config.txt avec le bon format attendu par Config.py
       - name: Create config.txt for uploader
         run: |
-          echo "cookies_dir = ./CookiesDir" > config.txt
-          echo "videos_dir = ./VideosDir" >> config.txt
-          echo "headless = true" >> config.txt
+          echo "cookies_dir: ./CookiesDir" > config.txt
+          echo "videos_dir: ./VideosDir" >> config.txt
+          echo "headless: true" >> config.txt
+          echo "no_watermark: false" >> config.txt
 
       # Exécution : on force le post pour test immédiat
       - name: Run Drive runner
