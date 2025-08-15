@@ -42,14 +42,15 @@ jobs:
           cd upstream/tiktok_uploader/tiktok-signature
           npm i
 
-      # Crée le chemin attendu + un browser.js de secours via Node (pas de heredoc)
+      # Crée le chemin attendu ET un browser.js de secours via Base64 (pas de heredoc / pas de node -e)
       - name: Ensure signature path exists (symlink + fallback browser.js)
         shell: bash
         run: |
           set -e
           ln -s upstream/tiktok_uploader tiktok_uploader 2>/dev/null || true
           mkdir -p tiktok_uploader/tiktok-signature
-          node -e "require('fs').writeFileSync('tiktok_uploader/tiktok-signature/browser.js', `const Signer = require('./index');\nconst url = process.argv[2];\nconst userAgent = process.argv[3];\n(async function main(){try{const signer=new Signer(url,userAgent);await signer.init();const sign=await signer.sign(url);const navigator=await signer.navigator();const output=JSON.stringify({status:'ok',data:{...sign,navigator}});console.log(output);await signer.close();}catch(err){console.error(err);process.exit(1);}})();` );"
+          B64='Y29uc3QgU2lnbmVyID0gcmVxdWlyZSgnLi9pbmRleCcpOwpjb25zdCB1cmwgPSBwcm9jZXNzLmFyZ3ZbMl07CmNvbnN0IHVzZXJBZ2VudCA9IHByb2Nlc3MuYXJndlszXTsKCihhc3luYyBmdW5jdGlvbiBtYWluKCkgewogIHRyeSB7CiAgICBjb25zdCBzaWduZXIgPSBuZXcgU2lnbmVyKHVybCwgdXNlckFnZW50KTsKICAgIGF3YWl0IHNpZ25lci5pbml0KCk7CiAgICBjb25zdCBzaWduID0gYXdhaXQgc2lnbmVyLnNpZ24odXJsKTsKICAgIGNvbnN0IG5hdmlnYXRvciA9IGF3YWl0IHNpZ25lci5uYXZpZ2F0b3IoKTsKICAgIGNvbnN0IG91dHB1dCA9IEpTT04uc3RyaW5naWZ5KHsKICAgICAgc3RhdHVzOiAib2siLAogICAgICBkYXRhOiB7IC4uLnNpZ24sIG5hdmlnYXRvciB9CiAgICB9KTsKICAgIGNvbnNvbGUubG9nKG91dHB1dCk7CiAgICBhd2FpdCBzaWduZXIuY2xvc2UoKTsKICB9IGNhdGNoIChlcnIpIHsKICAgIGNvbnNvbGUuZXJyb3IoZXJyKTsKICAgIHByb2Nlc3MuZXhpdCgxKTsKICB9Cn0pKCk7Cg=='
+          echo "$B64" | base64 -d > tiktok_uploader/tiktok-signature/browser.js
 
       - name: Build signature bundle if present
         run: |
