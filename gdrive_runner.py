@@ -3,7 +3,7 @@ import base64, io, json, os, random, subprocess, sys, tempfile
 from pathlib import Path
 CLI_PATH = Path("upstream/cli.py") 
 from typing import List
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from google.oauth2.service_account import Credentials
@@ -63,10 +63,23 @@ def ensure_today_schedule():
         save_schedule(sch)
     return sch
 
+GRACE_MINUTES = 10
+
 def should_post_now(sch):
     now = datetime.now(PARIS_TZ)
+    today = now.date()
     for slot in sch["slots"]:
-        if not slot["posted"] and now.hour == slot["hour"] and now.minute == slot["minute"]:
+        if slot.get("posted"):
+            continue
+        # datetime du slot aujourd'hui
+        slot_dt = datetime(year=today.year, month=today.month, day=today.day,
+                           hour=slot["hour"], minute=slot["minute"], tzinfo=PARIS_TZ)
+        # On poste si on est à l'heure OU dans la fenêtre de grâce
+        if slot_dt <= now < (slot_dt + timedelta(minutes=GRACE_MINUTES)):
+            # info utile si on est en léger retard
+            delay = int((now - slot_dt).total_seconds() // 60)
+            if delay > 0:
+                print(f"⏱️ Créneau rattrapé avec {delay} min de retard (tolérance {GRACE_MINUTES} min).")
             return slot
     return None
 
