@@ -1,176 +1,288 @@
-# gdrive_runner.py — Google Drive + 5 créneaux/jour aléatoires (heure FR)
-import base64, io, json, os, random, subprocess, sys, tempfile
+#!/usr/bin/env python3
+import os, io, json, base64, random, re, unicodedata, subprocess, sys
 from pathlib import Path
-CLI_PATH = Path("upstream/cli.py") 
-from typing import List
-from datetime import datetime
-from zoneinfo import ZoneInfo
+from datetime import datetime, date
+import pytz
 
-from google.oauth2.service_account import Credentials
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaIoBaseDownload
+# === ENV / Secrets ===
+GDRIVE_SA_JSON_B64 = os.environ.get("GDRIVE_SA_JSON_B64", "")
+GDRIVE_FOLDER_IDS  = os.environ.get("GDRIVE_FOLDER_IDS", "")  # CSV de folder IDs
+TIKTOK_USER        = os.environ.get("TIKTOK_USERNAME", "").strip().lstrip("@")
+COOKIE_B64         = os.environ.get("COOKIES_BASE64", "")
+FORCE_POST         = os.environ.get("FORCE_POST") == "1"
 
-# --- Secrets/vars d'env ---
-FOLDER_IDS   = [s.strip() for s in os.environ["GDRIVE_FOLDER_IDS"].split(",") if s.strip()]
-TIKTOK_USER  = os.environ["TIKTOK_USERNAME"]
-COOKIE_B64   = os.environ["COOKIES_BASE64"]
-SA_JSON_B64  = os.environ["GDRIVE_SA_JSON_B64"]
+# === Dossiers ===
+STATE_DIR = Path("state"); STATE_DIR.mkdir(exist_ok=True)
+COOKIES_DIR = Path("CookiesDir"); COOKIES_DIR.mkdir(exist_ok=True)
+TMP_DIR = Path("/tmp"); TMP_DIR.mkdir(exist_ok=True)
 
-# --- Descriptions (mets les tiennes ici) ---
-DESCRIPTIONS = [
-    "Imaginez tu croises ce troubadour ASMR dans la rue #asmr #asterion #feldup",
-    "Vous me le surveillez celui-là original #asterion #asmr #pokemon",
-]
-
-# --- Fichiers d'état (versionnés) ---
-USED_FILE     = Path("state/used.json")      # vidéos déjà utilisées
-SCHEDULE_FILE = Path("state/schedule.json")  # tirages horaires du jour
-
-# --- Créneaux quotidiens Europe/Paris ---
-PARIS_TZ = ZoneInfo("Europe/Paris")
-SLOTS_HOURS   = [8, 11, 14, 17, 20]          # heures FR
-MINUTES_GRID  = list(range(0, 60, 5))        # minutes possibles: 0,5,10,...,55
-
-# ============ UTIL ÉTAT ============
-def _load_json(path: Path, default):
-    if path.exists():
-        try: return json.loads(path.read_text(encoding="utf-8"))
-        except Exception: return default
-    return default
-
-def _save_json(path: Path, payload):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    tmp.replace(path)
-
-def load_used():        return _load_json(USED_FILE, {"used_ids": []})
-def save_used(d):       _save_json(USED_FILE, d)
-def load_schedule():    return _load_json(SCHEDULE_FILE, {"date": None, "slots": []})
-def save_schedule(d):   _save_json(SCHEDULE_FILE, d)
-
-# ============ PLANNING JOURNALIER ============
-def ensure_today_schedule():
-    today = datetime.now(PARIS_TZ).date().isoformat()
-    sch = load_schedule()
-    if sch.get("date") != today or not sch.get("slots"):
-        random.seed()
-        slots = []
-        for h in SLOTS_HOURS:
-            m = random.choice(MINUTES_GRID)         # minute aléatoire alignée sur */5
-            slots.append({"hour": h, "minute": m, "posted": False})
-        sch = {"date": today, "slots": slots}
-        save_schedule(sch)
-    return sch
-
-def should_post_now(sch):
-    now = datetime.now(PARIS_TZ)
-    for slot in sch["slots"]:
-        if not slot["posted"] and now.hour == slot["hour"] and now.minute == slot["minute"]:
-            return slot
-    return None
-
-def mark_posted(sch, slot):
-    slot["posted"] = True
-    save_schedule(sch)
-
-# ============ GOOGLE DRIVE ============
-def drive_service():
-    sa_json = json.loads(base64.b64decode(SA_JSON_B64).decode("utf-8"))
-    creds = Credentials.from_service_account_info(sa_json, scopes=["https://www.googleapis.com/auth/drive.readonly"])
+# === Google Drive client ===
+def build_drive():
+    from google.oauth2 import service_account
+    from googleapiclient.discovery import build
+    if not GDRIVE_SA_JSON_B64:
+        raise RuntimeError("GDRIVE_SA_JSON_B64 manquant")
+    sa_json = base64.b64decode(GDRIVE_SA_JSON_B64.encode("utf-8"))
+    creds = service_account.Credentials.from_service_account_info(
+        json.loads(sa_json.decode("utf-8")),
+        scopes=["https://www.googleapis.com/auth/drive.readonly"]
+    )
     return build("drive", "v3", credentials=creds, cache_discovery=False)
 
-def list_videos_in_folder(svc, folder_id: str) -> List[dict]:
-    q = f"'{folder_id}' in parents and trashed=false"
-    fields = "files(id,name,mimeType,size,modifiedTime),nextPageToken"
-    page_token = None; out = []
-    while True:
-        resp = svc.files().list(q=q, spaces="drive", fields=f"nextPageToken,{fields}", pageToken=page_token).execute()
-        out.extend(resp.get("files", []))
-        page_token = resp.get("nextPageToken")
-        if not page_token: break
-    return [f for f in out if f["name"].lower().endswith((".mp4",".mov",".m4v",".webm"))]
+# === Utilitaires état ===
+def load_json(path, default=None):
+    p = Path(path)
+    if not p.exists():
+        return default if default is not None else {}
+    try:
+        return json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return default if default is not None else {}
 
-def list_all_videos(svc) -> List[dict]:
-    allv = []
-    for fid in FOLDER_IDS:
-        allv.extend(list_videos_in_folder(svc, fid))
-    return allv
+def save_json(path, data):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    Path(path).write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
 
-def pick_one(files: List[dict], used_ids: List[str]) -> dict | None:
-    remaining = [f for f in files if f["id"] not in used_ids]
-    if not remaining:
-        used_ids.clear()                  # tout épuisé -> on repart du début
-        remaining = files[:]
-    random.shuffle(remaining)
-    return remaining[0] if remaining else None
+# === 4) Nom de fichier safe ===
+def safe_filename(name: str) -> str:
+    n = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
+    n = re.sub(r"[^\w\-. ]", "_", n)
+    return n[:150] if len(n) > 150 else n
 
-def download_file(svc, file_id: str, dest: Path):
-    req = svc.files().get_media(fileId=file_id)
-    fh = io.FileIO(dest, "wb")
-    downloader = MediaIoBaseDownload(fh, req)
-    done = False
-    while not done:
-        status, done = downloader.next_chunk()
-        if status:
-            print(f"Téléchargement {int(status.progress()*100)}%")
+# === 3) Spintax + hashtags + limite 2200 ===
+HASHTAGS_BUCKETS = [
+    ["#asterion", "#asmr", "#fr", "#drole"],
+    ["#humour", "#fyp", "#france", "#tiktokfr"],
+    ["#gaming", "#clips", "#twitch", "#fr"]
+]
+SPINTAX = [
+    "Imagine tu croises ce troubadour {dans la rue|au marché|dans le métro}…",
+    "Tu valides ? {oui|non} 👇",
+    "J’essaie un {nouveau|autre} format, dis-moi !",
+]
 
-# ============ COOKIES + UPLOAD ============
+def spin_text() -> str:
+    s = random.choice(SPINTAX)
+    def repl(m):
+        return random.choice(m.group(1).split("|"))
+    return re.sub(r"\{([^}]+)\}", repl, s)
+
+def build_caption(base_caption: str, desc_hash_set) -> str:
+    cap = (base_caption or "").strip()
+    # évite doublon exact (via hash)
+    if is_desc_duplicate(cap, desc_hash_set):
+        cap = f"{spin_text()} {cap}".strip()
+    tags = " ".join(random.choice(HASHTAGS_BUCKETS))
+    cap = (cap + " " + tags).strip()
+    return cap[:2200]
+
+# === 2) Anti-doublons (fichiers + desc) ===
+USED_PATH = STATE_DIR / "used.json"
+def load_used():
+    return load_json(USED_PATH, default={"files": [], "desc_hash": []})
+
+def save_used(u):
+    save_json(USED_PATH, u)
+
+def is_desc_duplicate(desc: str, desc_hash_set=None) -> bool:
+    import hashlib
+    h = hashlib.sha1((desc or "").encode("utf-8")).hexdigest()
+    if desc_hash_set is not None:
+        return h in desc_hash_set
+    u = load_used()
+    return h in u.get("desc_hash", [])
+
+def mark_used(file_id: str, desc: str):
+    import hashlib
+    u = load_used()
+    if file_id and file_id not in u["files"]:
+        u["files"].append(file_id)
+    h = hashlib.sha1((desc or "").encode("utf-8")).hexdigest()
+    if h not in u["desc_hash"]:
+        u["desc_hash"].append(h)
+    save_used(u)
+
+def pick_unique_from_drive(files, used_ids):
+    # files: list of {id,name}
+    random.shuffle(files)
+    for f in files:
+        if f["id"] not in used_ids:
+            return f
+    return None
+
+# === 1) Backoff (saute prochain créneau si 2 fails) ===
+FAILS_PATH = STATE_DIR / "fails.json"
+def get_fail_state():
+    return load_json(FAILS_PATH, default={"consecutive": 0})
+
+def set_fail_state(n):
+    save_json(FAILS_PATH, {"consecutive": int(n)})
+
+def backoff_skip_next_slot(schedule):
+    # marque le prochain slot non posté comme "posted": True
+    for s in schedule.get("slots", []):
+        if not s.get("posted"):
+            s["posted"] = True
+            break
+    save_json(STATE_DIR / "schedule.json", schedule)
+
+# === Planning (création si absent) ===
+TZ = pytz.timezone("Europe/Paris")
+SLOTS_WINDOWS = [(8,9), (11,12), (14,15), (17,18), (20,21)]  # inclusifs sur l'heure de départ, exclusifs sur fin
+
+def today_key():
+    return date.today().isoformat()
+
+def gen_today_schedule():
+    slots = []
+    for h0, h1 in SLOTS_WINDOWS:
+        hour = random.randint(h0, h1 - 1)
+        minute = random.randint(0, 59)
+        slots.append({"hour": hour, "minute": minute, "posted": False})
+    return {"day": today_key(), "slots": slots}
+
+def load_schedule():
+    sch_path = STATE_DIR / "schedule.json"
+    sch = load_json(sch_path, default=None)
+    if not sch or sch.get("day") != today_key():
+        sch = gen_today_schedule()
+        save_json(sch_path, sch)
+    return sch
+
+def should_post_now(schedule):
+    now = datetime.now(TZ)
+    # trouve un slot qui matche heure/minute
+    for idx, s in enumerate(schedule.get("slots", [])):
+        if not s["posted"] and s["hour"] == now.hour and s["minute"] == now.minute:
+            return idx
+    return None
+
+# === Cookies ===
 def restore_cookies():
-    Path("CookiesDir").mkdir(exist_ok=True)
     raw = base64.b64decode(COOKIE_B64.encode("utf-8"))
-    uname = TIKTOK_USER.strip().lstrip("@")
-    # le tien généré par login:
-    (Path("CookiesDir") / f"tiktok_session-{uname}.cookie").write_bytes(raw)
-    # copié sous d'autres noms possibles:
-    (Path("CookiesDir") / "main.cookie").write_bytes(raw)
-    (Path("CookiesDir") / f"{uname}.cookie").write_bytes(raw)
+    # nom principal généré par "login -n <user>"
+    (COOKIES_DIR / f"tiktok_session-{TIKTOK_USER}.cookie").write_bytes(raw)
+    # alias
+    (COOKIES_DIR / "main.cookie").write_bytes(raw)
+    (COOKIES_DIR / f"{TIKTOK_USER}.cookie").write_bytes(raw)
 
-def run_upload(local_path: Path, title_desc: str):
-    cmd = [sys.executable, str(CLI_PATH), "upload", "--user", TIKTOK_USER, "-v", str(local_path), "-t", title_desc]
+# === Drive : lister & télécharger ===
+def list_drive_files(drive):
+    # agrège tous les fichiers des folders donnés
+    parents = [p.strip() for p in GDRIVE_FOLDER_IDS.split(",") if p.strip()]
+    out = []
+    for pid in parents:
+        page_token = None
+        while True:
+            resp = drive.files().list(
+                q=f"'{pid}' in parents and trashed=false",
+                fields="nextPageToken, files(id,name,mimeType,size)",
+                pageSize=1000,
+                pageToken=page_token
+            ).execute()
+            out.extend([{"id": f["id"], "name": f["name"]} for f in resp.get("files", [])])
+            page_token = resp.get("nextPageToken")
+            if not page_token:
+                break
+    return out
+
+def download_drive_file(drive, file_id, name) -> Path:
+    from googleapiclient.http import MediaIoBaseDownload
+    request = drive.files().get_media(fileId=file_id)
+    # nom local safe
+    local = TMP_DIR / safe_filename(name)
+    with io.FileIO(local, "wb") as fh:
+        downloader = MediaIoBaseDownload(fh, request, chunksize=1024*1024)
+        done = False
+        while not done:
+            status, done = downloader.next_chunk()
+    return local
+
+# === Description de base (ton ancien dictionnaire peut rester) ===
+def pick_base_caption() -> str:
+    # TODO: branche ton dictionnaire/algorithme à la place si besoin
+    candidates = [
+        "Vous me le surveillez celui-là original",
+        "Imaginez tu croises ce troubadour ASMR dans la rue",
+        "On tente un nouveau format, tu valides ?"
+    ]
+    return random.choice(candidates)
+
+# === Upload via upstream CLI ===
+def run_upload(local_path: Path, caption: str):
+    # appelle le CLI de l'uploader
+    cmd = [
+        sys.executable, "upstream/cli.py", "upload",
+        "--user", TIKTOK_USER,
+        "-v", str(local_path),
+        "-t", caption
+    ]
     print("RUN:", " ".join(cmd))
     subprocess.run(cmd, check=True)
 
-# ============ MAIN ============
+# === Main ===
 def main():
-    sch = ensure_today_schedule()
-    slot = should_post_now(sch)
-        # Mode test : forcer le post même si ce n'est pas l'heure tirée
-    if not slot and os.environ.get("FORCE_POST") == "1":
-        slot = {"hour": 99, "minute": 99, "posted": False}  # créneau factice
-    if not slot:
-        now = datetime.now(PARIS_TZ)
-        print(f"⏳ {now:%Y-%m-%d %H:%M} (Paris) — pas l'heure tirée aujourd'hui. Prochain passage…")
+    # plan du jour + check créneau
+    sch = load_schedule()
+    slot_idx = should_post_now(sch)
+    now = datetime.now(TZ).strftime("%Y-%m-%d %H:%M")
+
+    if not slot_idx and FORCE_POST:
+        # Mode test: forcer un créneau factice
+        slot_idx = -1
+        print("🧪 FORCE_POST actif — on poste maintenant (test).")
+    elif slot_idx is None:
+        print(f"⏳ {now} (Paris) — pas l'heure tirée aujourd'hui. Prochain passage…")
         return
 
-    print(f"🕒 Créneau déclenché: {slot['hour']:02d}:{slot['minute']:02d} (Europe/Paris)")
-
-    used = load_used()
-    svc = drive_service()
-    files = list_all_videos(svc)
-    if not files:
-        print("Aucune vidéo trouvée dans le(s) dossier(s) Drive.")
-        return
-
-    chosen = pick_one(files, used["used_ids"])
-    print(f"🎯 Vidéo: {chosen['name']} ({chosen['id']})")
-
-    tmpdir = Path(tempfile.mkdtemp())
-    local = tmpdir / chosen["name"]
-    print("⬇️ Téléchargement…"); download_file(svc, chosen["id"], local)
-
+    # cookies
     restore_cookies()
-    desc = random.choice(DESCRIPTIONS)
-    print(f"📝 Description: {desc}")
+
+    # états anti-doublon / backoff
+    used = load_used()
+    used_ids = set(used.get("files", []))
+    desc_hash_set = set(used.get("desc_hash", []))
+    fails = get_fail_state()
+
+    # GDrive → choix d'une vidéo jamais utilisée
+    drive = build_drive()
+    files = list_drive_files(drive)
+    if not files:
+        print("⚠️ Aucune vidéo trouvée sur Drive.")
+        return
+    chosen = pick_unique_from_drive(files, used_ids)
+    if not chosen:
+        print("ℹ️ Toutes les vidéos ont déjà été utilisées (anti-doublon).")
+        return
+
+    print(f"🎯 Vidéo: {chosen['id']} — {chosen['name']}")
+    local_path = download_drive_file(drive, chosen["id"], chosen["name"])
+    # 4) nom safe déjà appliqué au download
+    # description finale 3)
+    base_cap = pick_base_caption()
+    caption = build_caption(base_cap, desc_hash_set)
+    print("📝 Description:", caption)
 
     try:
-        run_upload(local, desc)
-        used["used_ids"].append(chosen["id"]); save_used(used)
-        mark_posted(sch, slot)
+        # upload
+        run_upload(local_path, caption)
+
+        # succès → marque slot + reset fail + anti-doublons
+        if slot_idx != -1:
+            sch["slots"][slot_idx]["posted"] = True
+            save_json(STATE_DIR / "schedule.json", sch)
+        set_fail_state(0)
+        mark_used(chosen["id"], caption)
         print("✅ Upload OK — état/plan du jour mis à jour.")
     except subprocess.CalledProcessError as e:
-        print("❌ Upload échec:", e)
+        # échec → backoff si 2 fails d'affilée
+        fails["consecutive"] = fails.get("consecutive", 0) + 1
+        set_fail_state(fails["consecutive"])
+        if fails["consecutive"] >= 2:
+            print("🛑 2 échecs consécutifs — on saute le prochain créneau (backoff).")
+            backoff_skip_next_slot(sch)
+        print(f"❌ Upload échec: {e}")
+        sys.exit(1)
 
 if __name__ == "__main__":
-    random.seed()
     main()
